@@ -99,7 +99,11 @@ sub _parse_tal
         push @key_data, $line;
     }
 
-    return { urls => \@urls, public_key => { content => (join '', @key_data) } };
+    return { urls => \@urls, ,
+             public_key => {
+                algorithm => "1.2.840.113549.1.1.11",
+                content => (join '', @key_data)
+             } };
 }
 
 sub _get_path
@@ -240,7 +244,15 @@ sub run
         $self->_process_tal($tal_data);
     }
 
-    my $current = $state->{'current'}->[0];
+    my %revoked =
+        map { $_->{'algorithm'}.':'.
+              $_->{'content'} => 1 }
+            @{$state->{'revoked'}};
+
+    my $current =
+        first { not $revoked{$_->{'public_key'}->{'algorithm'}.':'.
+                             $_->{'public_key'}->{'content'}} }
+            @{$state->{'current'}};
     my $key_data_out =
         canonicalise_pem($current->{'public_key'}->{'content'});
 
