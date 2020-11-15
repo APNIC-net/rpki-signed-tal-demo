@@ -22,7 +22,7 @@ keys (plus other state) to `{state-path}`.  On subsequent runs,
 `{tal-path}` is not used as input, but the process is otherwise the
 same.
 
-[https://rpki-testbed.apnic.net/rpki-signed-tal-demo](https://rpki-testbed.apnic.net/signed-tal.html)
+[https://rpki-testbed.apnic.net/signed-tal.html](https://rpki-testbed.apnic.net/signed-tal.html)
 has a list of various testbed TAs that can be used to test different
 signed TAL scenarios.
 
