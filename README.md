@@ -40,6 +40,11 @@ it's possible to test validation alongside TAL updates.  For example:
 has a list of various testbed TAs that can be used to test different
 signed TAL scenarios.
 
+### Todo
+
+ - Verify manifest/TAK against CRL.
+ - Handle URLs being changed for an existing key.
+
 ### License
 
 See [LICENSE](./LICENSE).

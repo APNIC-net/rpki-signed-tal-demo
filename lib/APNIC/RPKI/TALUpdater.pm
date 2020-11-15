@@ -163,13 +163,12 @@ sub _process_tal
         }
     }
 
-    my $tak;
-    for my $file (@{$mft->files()}) {
-        if ($file->{'filename'} =~ /\.tak$/) {
-            $tak = $file;
-            last;
-        }
+    my @taks = grep { $_->{'filename'} =~ /\.tak$/ } @{$mft->files()};
+    if (@taks > 1) {
+        die "multiple TAKs found (there can only be zero or one)";
     }
+
+    my $tak = $taks[0];
     if (not $tak) {
         return;
     }
@@ -240,11 +239,21 @@ sub run
     }
     my $state = $self->{'state'};
 
+    my %revoked =
+        map { $_->{'algorithm'}.':'.
+              $_->{'content'} => 1 }
+            @{$state->{'revoked'}};
+
     for my $tal_data (@{$state->{'current'}}) {
+        my $pk = $tal_data->{'public_key'};
+        my $rkey = $pk->{'algorithm'}.':'.$pk->{'content'};
+        if ($revoked{$rkey}) {
+            next;
+        }
         $self->_process_tal($tal_data);
     }
 
-    my %revoked =
+    %revoked =
         map { $_->{'algorithm'}.':'.
               $_->{'content'} => 1 }
             @{$state->{'revoked'}};
@@ -253,6 +262,9 @@ sub run
         first { not $revoked{$_->{'public_key'}->{'algorithm'}.':'.
                              $_->{'public_key'}->{'content'}} }
             @{$state->{'current'}};
+    if (not $current) {
+        die "all keys revoked: leaving tal/state unchanged";
+    }
     my $key_data_out =
         canonicalise_pem($current->{'public_key'}->{'content'});
 
