@@ -4,6 +4,7 @@ use warnings;
 use strict;
 
 use Cwd qw(getcwd);
+use Digest::SHA qw(sha256);
 use File::Slurp qw(read_file write_file);
 use File::Temp qw(tempdir);
 use JSON::XS qw(encode_json decode_json);
@@ -146,6 +147,17 @@ sub _process_tal
 
     my $mft = APNIC::RPKI::Manifest->new();
     $mft->decode($mft_data);
+
+    for my $file (@{$mft->files()}) {
+        my $path = $self->_get_path($repo_url.'/'.$file->{'filename'});
+        my $expected_hash = $file->{'hash'};
+        my $data = read_file($path);
+        my $hash = sha256($data);
+        if ($hash ne $expected_hash) {
+            die "incorrect manifest file hash for ".
+                $file->{'filename'};
+        }
+    }
 
     my $tak;
     for my $file (@{$mft->files()}) {

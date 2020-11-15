@@ -47,6 +47,8 @@ RUN git clone https://github.com/kristapsdz/openrsync.git \
     && make \
     && make install \
     && cd ..
+RUN apt-get install -y \
+    libdigest-sha-perl
 COPY . /root/rpki-signed-tal-demo
 RUN cd /root/rpki-signed-tal-demo/ && perl Makefile.PL && make && make test && make install
 RUN rm -rf /root/rpki-signed-tal-demo/
