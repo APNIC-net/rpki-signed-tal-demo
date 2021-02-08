@@ -99,7 +99,7 @@ sub _parse_tal
         push @key_data, $line;
     }
 
-    return { urls => \@urls, ,
+    return { urls => \@urls,
              public_key => {
                 algorithm => "1.2.840.113549.1.1.11",
                 content => (join '', @key_data)
@@ -232,10 +232,8 @@ sub _process_tal
         if (not $exists) {
             push @{$self->{'state'}->{'current'}}, $tak_current_key;
         } else {
-            my @urls =
-                uniq (@{$exists->{'urls'}},
-                        @{$tak_current_key->{'urls'}});
-            $exists->{'urls'} = \@urls;
+            my @urls = uniq @{$tak_current_key->{'urls'}};
+            push @{$exists->{'new_urls'}}, @urls;
         }
     }
 
@@ -274,6 +272,10 @@ sub run
             next;
         }
         $self->_process_tal($tal_data);
+    }
+    for my $key (@{$state->{'current'}}) {
+        $key->{'urls'} = [ uniq @{$key->{'new_urls'}} ];
+        delete $key->{'new_urls'};
     }
 
     %revoked =
