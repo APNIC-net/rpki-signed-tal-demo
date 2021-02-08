@@ -42,7 +42,6 @@ signed TAL scenarios.
 
 ### Todo
 
- - Verify manifest/TAK against CRL.
  - Handle URLs being changed for an existing key.
 
 ### License

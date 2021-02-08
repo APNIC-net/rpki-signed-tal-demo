@@ -5,6 +5,7 @@ use strict;
 
 use File::Slurp qw(read_file);
 use File::Temp;
+use List::Util qw(first);
 use Net::CIDR::Set;
 use Set::IntSpan;
 
@@ -68,6 +69,22 @@ sub verify_cms
     return read_file($fn_output);
 }
 
+sub get_ee_cert
+{
+    my ($self, $input) = @_;
+
+    my $ft_output = File::Temp->new();
+    my $fn_output = $ft_output->filename();
+
+    my $openssl = $self->get_openssl_path();
+    system_ad("$openssl cms -verify -noverify -inform DER ".
+              "-in $input ".
+              "-certsout $fn_output",
+              $self->{'debug'});
+
+    return read_file($fn_output);
+}
+
 sub get_repository_url
 {
     my ($self, $cert) = @_;
@@ -116,6 +133,70 @@ sub get_manifest_url
     $mft_url =~ s/\s*$//;
 
     return $mft_url;
+}
+
+sub get_crl_serials
+{
+    my ($self, $crl) = @_;
+
+    my $fn_crl;
+    my $ft_crl = File::Temp->new();
+
+    if (-e $crl) {
+        $fn_crl = $crl;
+    } else {
+        print $ft_crl $crl;
+        $ft_crl->flush();
+        $fn_crl = $ft_crl->filename();
+    }
+
+    my $openssl = $self->get_openssl_path();
+    my $cmd_str = "$openssl crl -inform DER -in $fn_crl ".
+                  "-text -noout";
+    my @lines = `$cmd_str`;
+    chomp for @lines;
+
+    my $in_revoked = 0;
+    my @serials;
+    for (my $i = 0; $i < @lines; $i++) {
+        if (not $in_revoked) {
+            if ($lines[$i] =~ /^Revoked Certificates/) {
+                $in_revoked = 1;
+            }
+        } else {
+            if ($lines[$i] =~ /^    Serial Number: (.*)$/) {
+                push @serials, $1;
+            } elsif ($lines[$i] =~ /^    Signature/) {
+                last;
+            }
+        }
+    }
+
+    @serials = map { s/0*//; $_ } @serials;
+
+    return \@serials;
+}
+
+sub get_serial
+{
+    my ($self, $cert) = @_;
+
+    my $ft_cert = File::Temp->new();
+    print $ft_cert $cert;
+    $ft_cert->flush();
+    my $fn_cert = $ft_cert->filename();
+
+    my $openssl = $self->get_openssl_path();
+    my $cmd_str = "$openssl x509 -in $fn_cert ".
+                  "-text -noout";
+    my @lines = `$cmd_str`;
+    chomp for @lines;
+    use Data::Dumper;
+    my $serial_line =
+        first { /^        Serial Number:/ }
+            @lines;
+    my ($serial) = ($serial_line =~ /.*: \d+ \(0x(.*)\)/);
+    return $serial;
 }
 
 1;

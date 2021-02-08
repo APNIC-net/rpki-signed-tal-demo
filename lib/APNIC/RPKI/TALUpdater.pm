@@ -163,6 +163,23 @@ sub _process_tal
         }
     }
 
+    my @crls = grep { $_->{'filename'} =~ /\.crl$/ } @{$mft->files()};
+    if (@crls != 1) {
+        die "no CRL found";
+    }
+    my $crl = $crls[0];
+
+    my $crl_filename = $crl->{'filename'};
+    my $crl_url = $repo_url.'/'.$crl_filename;
+    my $crl_path = $self->_get_path($crl_url);
+    my %crl_serials = map { $_ => 1 } $openssl->get_crl_serials($crl_path);
+
+    my $mft_ee_cert = $openssl->get_ee_cert($mft_path);
+    my $mft_serial = $openssl->get_serial($mft_ee_cert);
+    if ($crl_serials{$mft_serial}) {
+        die "manifest EE certificate is revoked";
+    }
+
     my @taks = grep { $_->{'filename'} =~ /\.tak$/ } @{$mft->files()};
     if (@taks > 1) {
         die "multiple TAKs found (there can only be zero or one)";
@@ -179,6 +196,12 @@ sub _process_tal
 
     my $tak_obj = APNIC::RPKI::TAK->new();
     my $tak_data = $openssl->verify_cms($tak_path, $cert_pem_path);
+    my $tak_ee_cert = $openssl->get_ee_cert($tak_path);
+    my $serial = $openssl->get_serial($tak_ee_cert);
+    if ($crl_serials{$serial}) {
+        die "TAK EE certificate is revoked";
+    }
+
     $tak_obj->decode($tak_data);
 
     my @tak_revoked_keys = @{$tak_obj->revoked_keys()};
