@@ -11,6 +11,7 @@ use JSON::XS qw(encode_json decode_json);
 use List::Util qw(first);
 use List::MoreUtils qw(uniq);
 use MIME::Base64 qw(encode_base64);
+use URI;
 
 use APNIC::RPKI::OpenSSL;
 use APNIC::RPKI::Manifest;
@@ -201,8 +202,14 @@ sub _process_tal
     if ($crl_serials{$serial}) {
         die "TAK EE certificate is revoked";
     }
+    if (not $openssl->is_inherit($tak_ee_cert)) {
+        die "TAK EE certificate does not use the inherit bit";
+    }
 
     $tak_obj->decode($tak_data);
+    if ($tak_obj->version() != 0) {
+        die "TAK version must be 0";
+    }
 
     my @tak_revoked_keys = @{$tak_obj->revoked_keys()};
     for my $k (@tak_revoked_keys) {
@@ -224,6 +231,14 @@ sub _process_tal
             encode_base64($k->{'public_key'}->{'content'}, '');
     }
     for my $tak_current_key (@tak_current_keys) {
+        my @urls = @{$tak_current_key->{'urls'}};
+        for my $url (@urls) {
+            my $uri = URI->new($url);
+            my $scheme = $uri->scheme();
+            if ($scheme ne 'rsync' and $scheme ne 'https') {
+                die "Certificate URL must be rsync or https";
+            }
+        }
         my $pk = $tak_current_key->{'public_key'};
         my $exists =
             first { my $spk = $_->{'public_key'};

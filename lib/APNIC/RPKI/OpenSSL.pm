@@ -191,12 +191,33 @@ sub get_serial
                   "-text -noout";
     my @lines = `$cmd_str`;
     chomp for @lines;
-    use Data::Dumper;
     my $serial_line =
         first { /^        Serial Number:/ }
             @lines;
     my ($serial) = ($serial_line =~ /.*: \d+ \(0x(.*)\)/);
     return $serial;
+}
+
+sub is_inherit
+{
+    my ($self, $cert) = @_;
+
+    my $ft_cert = File::Temp->new();
+    print $ft_cert $cert;
+    $ft_cert->flush();
+    my $fn_cert = $ft_cert->filename();
+
+    my $openssl = $self->get_openssl_path();
+    my $cmd_str = "$openssl x509 -in $fn_cert ".
+                  "-text -noout";
+    my @lines = `$cmd_str`;
+    chomp for @lines;
+    my $data = join '', @lines;
+    $data =~ s/\s+/ /g;
+    if ($data =~ /sbgp-autonomousSysNum: critical Autonomous System Numbers: inherit sbgp-ipAddrBlock: critical IPv4: inherit IPv6: inherit/) {
+        return 1;
+    }
+    return;
 }
 
 1;
