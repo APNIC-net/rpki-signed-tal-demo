@@ -11,39 +11,29 @@ sub usage
 {
     print <<EOF;
 Usage:
-$0 --tal {tal-path} --state {state-path}
+$0 --tal {tal-path}
 
-On the first run, `{state-path}` should point to a non-existent file:
-in that case, this takes the TAL at `{tal-path}`, finds the TAK issued
-under that TA, and then continues resolving TAs/TAKs until it has the
-complete set of current/revoked keys.  It then writes one of the
-current keys in TAL format to `{tal-path}`, and writes the full set of
-keys (plus other state) to `{state-path}`.  On subsequent runs,
-`{tal-path}` is not used as input, but the process is otherwise the
-same.
+This takes the TAL at `{tal-path}`, finds the TAK issued under that
+TA, and then continues resolving TAs/TAKs until it reaches an
+unrevoked key.  It then writes the earliest unrevoked current key in
+TAL format to `{tal-path}`.
 EOF
 
     exit(10);
 }
 
 my %options;
-GetOptions(\%options, 'tal=s', 'state=s');
+GetOptions(\%options, 'tal=s');
 if (not $options{'tal'}) {
     print "Please provide a TAL path.\n";
     usage();
 }
-if (not $options{'state'}) {
-    print "Please provide a state path.\n";
-    usage();
-}
 
-my ($tal_path, $state_path) =
-    @options{qw(tal state)};
+my $tal_path = $options{'tal'};
 
 my $tal_updater =
     APNIC::RPKI::TALUpdater->new(
-        tal_path   => $tal_path,
-        state_path => $state_path
+        tal_path => $tal_path,
     );
 $tal_updater->run();
 

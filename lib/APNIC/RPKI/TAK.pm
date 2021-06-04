@@ -20,22 +20,24 @@ use constant TAK_ASN1 => q<
         subjectPublicKey     BIT STRING
     }
     CertificateURI ::= IA5String
-    CurrentKey ::= SEQUENCE {
+    TAKey ::= SEQUENCE {
         certificateURIs       SEQUENCE OF CertificateURI,
         subjectPublicKeyInfo  SubjectPublicKeyInfo
     }
     TAK ::= SEQUENCE {
         version   [0] INTEGER,
-        current   SEQUENCE OF CurrentKey,
-        revoked   SEQUENCE OF SubjectPublicKeyInfo
+        current   TAKey,
+        successor TAKey OPTIONAL,
+        revoked   BOOLEAN
     }
 >;
 
 use base qw(Class::Accessor);
 APNIC::RPKI::TAK->mk_accessors(qw(
     version
-    current_keys
-    revoked_keys
+    current
+    successor
+    revoked
 ));
 
 sub new
@@ -59,6 +61,23 @@ sub new
     return $self;
 }
 
+sub _decode_key
+{
+    my ($key) = @_;
+
+    my $uris = $key->{'certificateURIs'};
+    my $spki = $key->{'subjectPublicKeyInfo'};
+    my %key_data = (
+        'algorithm' => $spki->{'algorithm'}->{'algorithm'},
+        'content'   => $spki->{'subjectPublicKey'}->[0]
+    );
+    my %decoded_key = (
+        urls => $uris,
+        public_key => \%key_data,
+    );
+    return \%decoded_key;
+}
+
 sub decode
 {
     my ($self, $tak) = @_;
@@ -70,25 +89,14 @@ sub decode
     }
 
     $self->version($data->{'version'});
-    my @current = @{$data->{'current'}};
-    my @current_keys =
-        map { my $uris = $_->{'certificateURIs'};
-              my $kd  = $_->{'subjectPublicKeyInfo'};
-              my $key = {
-                  'algorithm' => $kd->{'algorithm'}->{'algorithm'},
-                  'content'   => $kd->{'subjectPublicKey'}->[0]
-              };
-              +{ urls => $uris,
-                 public_key => $key } }
-            @current;
-    my @revoked = @{$data->{'revoked'}};
-    my @revoked_keys =
-        map { +{ algorithm => $_->{'algorithm'}->{'algorithm'},
-                 content   => $_->{'subjectPublicKey'}->[0] } }
-            @revoked;
-
-    $self->current_keys(\@current_keys);
-    $self->revoked_keys(\@revoked_keys);
+    my $current = _decode_key($data->{'current'});
+    $self->current($current);
+    if ($data->{'successor'}) {
+        my $successor = _decode_key($data->{'successor'});
+        $self->successor($successor);
+    }
+    my $revoked = $data->{'revoked'};
+    $self->revoked($revoked);
 
     return 1;
 }

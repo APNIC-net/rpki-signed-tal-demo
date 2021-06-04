@@ -220,4 +220,21 @@ sub is_inherit
     return;
 }
 
+sub get_public_key
+{
+    my ($self, $cert) = @_;
+
+    my $ft_cert = File::Temp->new();
+    print $ft_cert $cert;
+    $ft_cert->flush();
+    my $fn_cert = $ft_cert->filename();
+
+    my $openssl = $self->get_openssl_path();
+    my $cmd_str = "$openssl x509 -in $fn_cert ".
+                  "-pubkey -noout";
+    my @lines = `$cmd_str`;
+    chomp for @lines;
+    return \@lines;
+}
+
 1;

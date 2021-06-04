@@ -211,46 +211,41 @@ sub _process_tal
         die "TAK version must be 0";
     }
 
-    my @tak_revoked_keys = @{$tak_obj->revoked_keys()};
-    for my $k (@tak_revoked_keys) {
-        $k->{'content'} = encode_base64($k->{'content'}, '');
+    # Check that the current key matches the key used to issue the
+    # TAK.
+
+    my $current = $tak_obj->current();
+    if (not $current) {
+        die "TAK does not contain a current key";
     }
-    for my $tak_revoked_key (@tak_revoked_keys) {
-        my $exists =
-            first { $_->{'content'} eq $tak_revoked_key->{'content'}
-                and $_->{'algorithm'} eq $tak_revoked_key->{'algorithm'} }
-                @{$self->{'state'}->{'revoked'}};
-        if (not $exists) {
-            push @{$self->{'state'}->{'revoked'}}, $tak_revoked_key;
-        }
+    my $ta_key_from_cert = $openssl->get_public_key($cert_pem_path);
+    shift @{$ta_key_from_cert};
+    pop @{$ta_key_from_cert};
+    my $content = join '', @{$ta_key_from_cert};
+    my $ta_key_from_tak =
+        encode_base64($current->{'public_key'}->{'content'});
+    if ($ta_key_from_cert ne $ta_key_from_tak) {
+        die "TAK key does not match TA key: ".
+            $ta_key_from_cert.", ".$ta_key_from_tak;
     }
 
-    my @tak_current_keys = @{$tak_obj->current_keys()};
-    for my $k (@tak_current_keys) {
-        $k->{'public_key'}->{'content'} =
-            encode_base64($k->{'public_key'}->{'content'}, '');
-    }
-    for my $tak_current_key (@tak_current_keys) {
-        my @urls = @{$tak_current_key->{'urls'}};
-        for my $url (@urls) {
-            my $uri = URI->new($url);
-            my $scheme = $uri->scheme();
-            if ($scheme ne 'rsync' and $scheme ne 'https') {
-                die "Certificate URL must be rsync or https";
-            }
-        }
-        my $pk = $tak_current_key->{'public_key'};
-        my $exists =
-            first { my $spk = $_->{'public_key'};
-                    $spk->{'content'} eq $pk->{'content'} }
-                @{$self->{'state'}->{'current'}};
-        if (not $exists) {
-            push @{$self->{'state'}->{'current'}}, $tak_current_key;
-        } else {
-            my @urls = uniq @{$tak_current_key->{'urls'}};
-            push @{$exists->{'new_urls'}}, @urls;
-        }
-    }
+    # If there is a successor key, then make TAL data from it, and
+    # process that TA as well.  Otherwise, just return the TAK data
+    # from this TA.
+
+    my $successor = $tak_obj->successor();
+    if (not $successor) {
+        return ($tak_obj);
+    } else {
+        my $key_data_out =
+            canonicalise_pem($successor->{'public_key'}->{'content'});
+        my @tal_lines =
+            (join "\n", @{$successor->{'urls'}})."\n\n".
+            $key_data_out;
+        my $tal_data = _parse_tal(\@tal_lines);
+        my @extra_tak_objs = $self->_process_tal($tal_data);
+        return ($tak_obj, @extra_tak_objs);
+    } 
 
     return 1;
 }
@@ -261,59 +256,29 @@ sub run
 
     my $cwd = getcwd();
 
-    my ($tal_path, $state_path) =
-        @{$self}{qw(tal_path state_path)};
+    my $tal_path = $self->{'tal_path'};
     $self->{'output'} = tempdir();
 
-    if ((not -e $state_path) or ((stat($state_path))[7] == 0)) {
-        my @lines = read_file($tal_path);
-        my $tal_data = _parse_tal(\@lines);
-        $self->{'state'}->{'current'} = [ $tal_data ];
-    } else {
-        my $state = read_file($state_path);
-        $self->{'state'} = decode_json($state);
-    }
-    my $state = $self->{'state'};
+    my @lines = read_file($tal_path);
+    my $tal_data = _parse_tal(\@lines);
+    my @tak_objs = $self->_process_tal($tal_data);
 
-    my %revoked =
-        map { $_->{'algorithm'}.':'.
-              $_->{'content'} => 1 }
-            @{$state->{'revoked'}};
+    my $first_unrevoked_tak_obj =
+        first { not $_->revoked() }
+            @tak_objs;
 
-    for my $tal_data (@{$state->{'current'}}) {
-        my $pk = $tal_data->{'public_key'};
-        my $rkey = $pk->{'algorithm'}.':'.$pk->{'content'};
-        if ($revoked{$rkey}) {
-            next;
-        }
-        $self->_process_tal($tal_data);
-    }
-    for my $key (@{$state->{'current'}}) {
-        $key->{'urls'} = [ uniq @{$key->{'new_urls'}} ];
-        delete $key->{'new_urls'};
+    if (not $first_unrevoked_tak_obj) {
+        die "All TAK objects revoked: cannot update TAL state";
     }
 
-    %revoked =
-        map { $_->{'algorithm'}.':'.
-              $_->{'content'} => 1 }
-            @{$state->{'revoked'}};
-
-    my $current =
-        first { not $revoked{$_->{'public_key'}->{'algorithm'}.':'.
-                             $_->{'public_key'}->{'content'}} }
-            @{$state->{'current'}};
-    if (not $current) {
-        die "all keys revoked: leaving tal/state unchanged";
-    }
-    my $key_data_out =
-        canonicalise_pem($current->{'public_key'}->{'content'});
-
+    my $key = $first_unrevoked_tak_obj->{'current'};
+    my $key_data_out = canonicalise_pem($key->{'content'});
+    my @tal_lines =
+        (join "\n", @{$key->{'urls'}})."\n\n".
+        $key_data_out;
     chdir($cwd);
 
-    write_file($tal_path,
-               (join "\n", @{$current->{'urls'}})."\n\n".
-               $key_data_out);
-    write_file($state_path, encode_json($state));
+    write_file($tal_path, @tal_lines);
 
     return 1;
 }

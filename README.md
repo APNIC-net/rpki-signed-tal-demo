@@ -2,7 +2,8 @@
 
 A proof-of-concept for updating the TAL for a standalone RPKI
 validator, based on the TAK issued by the TA operator.  See
-[https://tools.ietf.org/html/draft-ietf-sidrops-signed-tal-06](https://tools.ietf.org/html/draft-ietf-sidrops-signed-tal-06).
+[https://tools.ietf.org/html/draft-ietf-sidrops-signed-tal](https://tools.ietf.org/html/draft-ietf-sidrops-signed-tal)
+(note that the current demo targets an unpublished draft version).
 
 ### Build
 
@@ -11,20 +12,16 @@ validator, based on the TAK issued by the TA operator.  See
 ### Usage
 
     $ docker run -it apnic/rpki-signed-tal-demo /bin/bash
-    # rpki-tal-updater --tal {tal-path} --state {state-path}
+    # rpki-tal-updater --tal {tal-path}
 
-On the first run, `{state-path}` should point to a non-existent file:
-in that case, this takes the TAL at `{tal-path}`, finds the TAK issued
-under that TA, and then continues resolving TAs/TAKs until it has the
-complete set of current/revoked keys.  It then writes the earliest
-unrevoked current key in TAL format to `{tal-path}`, and writes the
-full set of keys (plus other state) to `{state-path}`.  On subsequent
-runs, `{tal-path}` is not used as input, but the process is otherwise
-the same.
+This takes the TAL at `{tal-path}`, finds the TAK issued under that
+TA, and then continues resolving TAs/TAKs until it reaches an
+unrevoked key.  It then writes the earliest unrevoked current key in
+TAL format to `{tal-path}`.
 
 The container includes
-[rpki-client](https://github.com/kristapsdz/rpki-client), so that
-it's possible to test validation alongside TAL updates.  For example:
+[rpki-client](https://github.com/kristapsdz/rpki-client), so that it's
+possible to test validation alongside TAL updates.  For example:
 
     # echo "..." > tal
     # mkdir cache output
@@ -32,7 +29,7 @@ it's possible to test validation alongside TAL updates.  For example:
     # cat output/csv
     ASN,IP Prefix,Max Length,Trust Anchor
     AS65001,10.0.0.0/24,24,tal 
-    # rpki-tal-updater --tal tal --state state
+    # rpki-tal-updater --tal tal
     # rpki-client -c -t tal -d cache output
     ...
 
