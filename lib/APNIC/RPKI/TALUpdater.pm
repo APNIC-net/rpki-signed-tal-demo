@@ -218,15 +218,16 @@ sub _process_tal
     if (not $current) {
         die "TAK does not contain a current key";
     }
-    my $ta_key_from_cert = $openssl->get_public_key($cert_pem_path);
+    my $ta_key_from_cert = $openssl->get_public_key($cert_pem_data);
     shift @{$ta_key_from_cert};
     pop @{$ta_key_from_cert};
     my $content = join '', @{$ta_key_from_cert};
     my $ta_key_from_tak =
         encode_base64($current->{'public_key'}->{'content'});
-    if ($ta_key_from_cert ne $ta_key_from_tak) {
+    $ta_key_from_tak =~ s/\n//g;
+    if ($content ne $ta_key_from_tak) {
         die "TAK key does not match TA key: ".
-            $ta_key_from_cert.", ".$ta_key_from_tak;
+            $content.", ".$ta_key_from_tak;
     }
 
     # If there is a successor key, then make TAL data from it, and
@@ -238,7 +239,11 @@ sub _process_tal
         return ($tak_obj);
     } else {
         my $key_data_out =
-            canonicalise_pem($successor->{'public_key'}->{'content'});
+            canonicalise_pem(
+                encode_base64(
+                    $successor->{'public_key'}->{'content'}
+                )
+            );
         my @tal_lines =
             (join "\n", @{$successor->{'urls'}})."\n\n".
             $key_data_out;
@@ -272,7 +277,12 @@ sub run
     }
 
     my $key = $first_unrevoked_tak_obj->{'current'};
-    my $key_data_out = canonicalise_pem($key->{'content'});
+    my $key_data_out =
+        canonicalise_pem(
+            encode_base64(
+                $key->{'public_key'}->{'content'}
+            )
+        );
     my @tal_lines =
         (join "\n", @{$key->{'urls'}})."\n\n".
         $key_data_out;
