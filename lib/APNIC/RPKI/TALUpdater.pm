@@ -270,6 +270,29 @@ sub run
     my $tal_data = _parse_tal(\@lines);
     my @tak_objs = $self->_process_tal($tal_data);
 
+    my @revoked_tak_objs =
+        grep { $_->revoked() }
+            @tak_objs;
+    for my $tak_obj (@revoked_tak_objs) {
+        print "debug: keys have been revoked\n";
+        for (my $i = 0; $i < @revoked_tak_objs; $i++) {
+            my $tak_obj = $revoked_tak_objs[$i];
+            print "debug: TAL for revoked key ".($i + 1)."\n";
+            my $key = $tak_obj->{'current'};
+            my $key_data_out =
+                canonicalise_pem(
+                    encode_base64(
+                        $key->{'public_key'}->{'content'}
+                    )
+                );
+            my @tal_lines =
+                (join "\n", @{$key->{'urls'}})."\n\n".
+                $key_data_out;
+            print @tal_lines;
+            print "\n\n";
+        }
+    }
+
     my @unrevoked_tak_objs =
         grep { not $_->revoked() }
             @tak_objs;
@@ -289,12 +312,14 @@ sub run
                 (join "\n", @{$key->{'urls'}})."\n\n".
                 $key_data_out;
             print @tal_lines;
+            print "\n\n";
         }
     }
 
     my $first_unrevoked_tak_obj = $unrevoked_tak_objs[0];
     if (not $first_unrevoked_tak_obj) {
-        die "All TAK objects revoked: cannot update TAL state";
+        print STDERR "All TAK objects revoked: cannot update TAL state\n";
+        exit(1);
     }
 
     my $key = $first_unrevoked_tak_obj->{'current'};
