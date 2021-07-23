@@ -244,9 +244,11 @@ sub _process_tal
                     $successor->{'public_key'}->{'content'}
                 )
             );
-        my @tal_lines =
-            (join "\n", @{$successor->{'urls'}})."\n\n".
-            $key_data_out;
+        my @tal_lines = (
+            @{$successor->{'urls'}},
+            "",
+            (split /\n/, $key_data_out)
+        );
         my $tal_data = _parse_tal(\@tal_lines);
         my @extra_tak_objs = $self->_process_tal($tal_data);
         return ($tak_obj, @extra_tak_objs);
@@ -268,10 +270,29 @@ sub run
     my $tal_data = _parse_tal(\@lines);
     my @tak_objs = $self->_process_tal($tal_data);
 
-    my $first_unrevoked_tak_obj =
-        first { not $_->revoked() }
+    my @unrevoked_tak_objs =
+        grep { not $_->revoked() }
             @tak_objs;
+    if (@unrevoked_tak_objs > 1) {
+        print "debug: test keys available\n";
+        for (my $i = 1; $i < @unrevoked_tak_objs; $i++) {
+            my $tak_obj = $unrevoked_tak_objs[$i];
+            print "debug: TAL for test key $count\n";
+            my $key = $tak_obj->{'current'};
+            my $key_data_out =
+                canonicalise_pem(
+                    encode_base64(
+                        $key->{'public_key'}->{'content'}
+                    )
+                );
+            my @tal_lines =
+                (join "\n", @{$key->{'urls'}})."\n\n".
+                $key_data_out;
+            print @tal_lines;
+        }
+    }
 
+    my $first_unrevoked_tak_obj = $unrevoked_tak_objs[0];
     if (not $first_unrevoked_tak_obj) {
         die "All TAK objects revoked: cannot update TAL state";
     }
