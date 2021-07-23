@@ -277,7 +277,7 @@ sub run
         print "debug: test keys available\n";
         for (my $i = 1; $i < @unrevoked_tak_objs; $i++) {
             my $tak_obj = $unrevoked_tak_objs[$i];
-            print "debug: TAL for test key $count\n";
+            print "debug: TAL for test key $i\n";
             my $key = $tak_obj->{'current'};
             my $key_data_out =
                 canonicalise_pem(
