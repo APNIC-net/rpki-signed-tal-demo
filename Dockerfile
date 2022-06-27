@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ubuntu:22.10
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -y
@@ -25,7 +25,12 @@ RUN apt-get install -y \
     jq \
     vim \
     git \
-    libdatetime-perl
+    libdatetime-perl \
+    libtls25 \
+    libtls-dev \
+    libdigest-sha-perl \
+    libexpat1-dev \
+    sudo
 RUN cpanm Set::IntSpan Net::CIDR::Set
 RUN wget https://ftp.openssl.org/source/openssl-1.0.2p.tar.gz \
     && tar xf openssl-1.0.2p.tar.gz \
@@ -34,10 +39,19 @@ RUN wget https://ftp.openssl.org/source/openssl-1.0.2p.tar.gz \
     && make \
     && make install
 RUN yes | unminimize
-RUN git clone https://github.com/kristapsdz/rpki-client.git \
-    && cd rpki-client \
-    && ./configure \
-    && sed -i 's/^RPKI_PRIVDROP.*/RPKI_PRIVDROP = 0/' Makefile \
+RUN addgroup \
+    --gid 1000 \
+    rpki-client && \
+  adduser \
+    --home /var/lib/rpki-client \
+    --disabled-password \
+    --gid 1000 \
+    --uid 1000 \
+    rpki-client
+RUN wget https://ftp.openbsd.org/pub/OpenBSD/rpki-client/rpki-client-7.8.tar.gz \
+    && tar xf rpki-client-7.8.tar.gz \
+    && cd rpki-client-7.8 \
+    && ./configure --with-user=rpki-client \
     && make \
     && make install \
     && cd ..
@@ -47,8 +61,6 @@ RUN git clone https://github.com/kristapsdz/openrsync.git \
     && make \
     && make install \
     && cd ..
-RUN apt-get install -y \
-    libdigest-sha-perl
 COPY . /root/rpki-signed-tal-demo
 RUN cd /root/rpki-signed-tal-demo/ && perl Makefile.PL && make && make test && make install
 RUN rm -rf /root/rpki-signed-tal-demo/

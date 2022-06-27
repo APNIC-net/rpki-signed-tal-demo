@@ -19,9 +19,13 @@ unrevoked key.  It then writes the earliest unrevoked current key in
 TAL format to `{tal-path}`.
 
 The container includes
-[rpki-client](https://github.com/kristapsdz/rpki-client), so that it's
-possible to test validation alongside TAL updates.  For example:
+[rpki-client](https://ftp.openbsd.org/pub/OpenBSD/rpki-client/), so
+that it's possible to test validation alongside TAL updates.  For
+example:
 
+    # sudo -u rpki-client -H bash
+    # mkdir /tmp/test
+    # cd /tmp/test
     # echo "..." > tal
     # mkdir cache output
     # rpki-client -c -t tal -d cache output
@@ -34,7 +38,9 @@ possible to test validation alongside TAL updates.  For example:
 
 [https://rpki-testbed.apnic.net/signed-tal.html](https://rpki-testbed.apnic.net/signed-tal.html)
 has a list of various testbed TAs that can be used to test different
-signed TAL scenarios.
+signed TAL scenarios.  (The testbed RRDP service may not be
+functional, in which case relying parties should fall back to using
+rsync.)
 
 ### License
 
