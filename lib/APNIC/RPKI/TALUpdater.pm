@@ -4,7 +4,8 @@ use warnings;
 use strict;
 
 use Cwd qw(getcwd);
-use Digest::SHA qw(sha256);
+use Data::Dumper;
+use Digest::SHA qw(sha256 sha256_hex);
 use File::Slurp qw(read_file write_file);
 use File::Temp qw(tempdir);
 use JSON::XS qw(encode_json decode_json);
@@ -17,6 +18,8 @@ use APNIC::RPKI::OpenSSL;
 use APNIC::RPKI::Manifest;
 use APNIC::RPKI::TAK;
 use APNIC::RPKI::Utilities qw(canonicalise_pem);
+
+use constant THIRTY_DAYS => 60 * 60 * 24 * 30;
 
 our $VERSION = '0.1';
 
@@ -47,31 +50,38 @@ sub _fetch_rsync_path
     chdir $domain or die $!;
     if ($name =~ /\.[^\.]{3}$/) {
         my ($dir, $base) = ($name =~ /^(.*)\/(.*)$/);
-        my $res = system("mkdir -p $dir");
-        if ($res != 0) {
-            die "Unable to make repository directory ($path)";
-        }
-        chdir $dir;
-        $res = system("rsync -Laz --delete $path .");
-        if ($res != 0) {
-            die "Unable to fetch file ($path)";
-        }
-    } else {
-        my ($dir, $base) = ($name =~ /^(.*)\/(.*)$/);
         if (not $dir) {
             my $res = system("rsync -Laz --delete $path $name");
             if ($res != 0) {
-                die "Unable to fetch repository ($name)";
+                die "Unable to fetch file ($path)";
             }
         } else {
             my $res = system("mkdir -p $dir");
             if ($res != 0) {
                 die "Unable to make repository directory ($dir)";
             }
-            chdir $dir;
+            chdir $dir or die $!;
             $res = system("rsync -Laz --delete $path .");
             if ($res != 0) {
-                die "Unable to fetch repository ($path)";
+                die "Unable to fetch file ($path)";
+            }
+        }
+    } else {
+        my ($dir, $base) = ($name =~ /^(.*)\/(.*)$/);
+        if (not $dir) {
+            my $res = system("rsync -Laz --delete $path $name");
+            if ($res != 0) {
+                die "Unable to fetch file ($path)";
+            }
+        } else {
+            my $res = system("mkdir -p $dir");
+            if ($res != 0) {
+                die "Unable to make repository directory ($dir)";
+            }
+            chdir $dir or die $!;
+            $res = system("rsync -Laz --delete $path .");
+            if ($res != 0) {
+                die "Unable to fetch file ($path)";
             }
         }
     }
@@ -88,6 +98,9 @@ sub _parse_tal
         chomp $line;
         if ($line eq '') {
             last;
+        }
+        if ($line =~ /^#/) {
+            next;
         }
         if ($line !~ /^rsync:/) {
             push @key_data, $line;
@@ -129,7 +142,7 @@ sub _get_path
 
 sub _process_tal
 {
-    my ($self, $tal_data) = @_;
+    my ($self, $tal_data, $no_recurse) = @_;
 
     my $cert_rsync_url =
         first { $_ =~ /^rsync/ }
@@ -151,7 +164,10 @@ sub _process_tal
     my $mft_data = $openssl->verify_cms($mft_path, $cert_pem_path);
 
     my $mft = APNIC::RPKI::Manifest->new();
-    $mft->decode($mft_data);
+    eval { $mft->decode($mft_data); };
+    if (my $error = $@) {
+        die "Unable to decode manifest ($mft_path): $error";
+    }
 
     for my $file (@{$mft->files()}) {
         my $path = $self->_get_path($repo_url.'/'.$file->{'filename'});
@@ -188,6 +204,7 @@ sub _process_tal
 
     my $tak = $taks[0];
     if (not $tak) {
+        warn "no TAK found";
         return;
     }
 
@@ -206,7 +223,13 @@ sub _process_tal
         die "TAK EE certificate does not use the inherit bit";
     }
 
-    $tak_obj->decode($tak_data);
+    write_file("/tmp/tak", $tak_data);
+    write_file("/tmp/takpath", $tak_path);
+
+    eval { $tak_obj->decode($tak_data); };
+    if (my $error = $@) {
+        die "Unable to decode TAK object: $error";
+    }
     if ($tak_obj->version() != 0) {
         die "TAK version must be 0";
     }
@@ -230,6 +253,13 @@ sub _process_tal
             $content.", ".$ta_key_from_tak;
     }
 
+    # If no_recurse is true, then this is validating a successor key,
+    # and there is no need to validate further successor keys.
+
+    if ($no_recurse) {
+        return ($tak_obj);
+    }
+
     # If there is a successor key, then make TAL data from it, and
     # process that TA as well.  Otherwise, just return the TAK data
     # from this TA.
@@ -245,13 +275,13 @@ sub _process_tal
                 )
             );
         my @tal_lines = (
-            @{$successor->{'urls'}},
+            @{$successor->{'uris'}},
             "",
             (split /\n/, $key_data_out)
         );
         my $tal_data = _parse_tal(\@tal_lines);
-        my @extra_tak_objs = $self->_process_tal($tal_data);
-        return ($tak_obj, @extra_tak_objs);
+        my ($extra_tak_obj) = $self->_process_tal($tal_data);
+        return ($tak_obj, $extra_tak_obj);
     } 
 
     return 1;
@@ -266,75 +296,120 @@ sub run
     my $tal_path = $self->{'tal_path'};
     $self->{'output'} = tempdir();
 
+    my $state_path = $self->{'state_path'};
+    my $state_data = read_file($state_path) || '{}';
+    my $state = decode_json($state_data);
+
     my @lines = read_file($tal_path);
     my $tal_data = _parse_tal(\@lines);
-    my @tak_objs = $self->_process_tal($tal_data);
+    my ($current_tak_obj, $successor_tak_obj) =
+        $self->_process_tal($tal_data);
 
-    my @revoked_tak_objs =
-        grep { $_->revoked() }
-            @tak_objs;
-    for my $tak_obj (@revoked_tak_objs) {
-        print "debug: keys have been revoked\n";
-        for (my $i = 0; $i < @revoked_tak_objs; $i++) {
-            my $tak_obj = $revoked_tak_objs[$i];
-            print "debug: TAL for revoked key ".($i + 1)."\n";
-            my $key = $tak_obj->{'current'};
-            my $key_data_out =
-                canonicalise_pem(
-                    encode_base64(
-                        $key->{'public_key'}->{'content'}
+    my $use_successor = 0;
+
+    my $state_key =
+        sha256_hex($tal_data->{'public_key'}->{'content'});
+
+    if (not $successor_tak_obj) {
+        print "debug: no successor for this TAL\n";
+        # If there is a timer for this TAL, clear it.
+        if ($state->{$state_key}->{'timer'}) {
+            print "debug: deleting existing timer for $tal_path\n";
+            delete $state->{$state_key}->{'timer'};
+        }
+    } else {
+        my $success = 1;
+        # There is a successor TAK object.  Confirm that the original
+        # key and the successor key match.
+        if ($current_tak_obj->successor()->{'public_key'}->{'content'} ne
+                $successor_tak_obj->current()->{'public_key'}->{'content'}) {
+            print "debug: successor in current key does not match ".
+                  "current in successor key\n";
+            print "debug: successor in current key: ".
+                  encode_base64($current_tak_obj->successor()->{'public_key'}->{'content'})."\n";
+            print "debug: current in successor key: ".
+                  encode_base64($successor_tak_obj->current()->{'public_key'}->{'content'})."\n";
+            $success = 0;
+        }
+        if ($current_tak_obj->current()->{'public_key'}->{'content'} ne
+                $successor_tak_obj->predecessor()->{'public_key'}->{'content'}) {
+            print "debug: current in current key does not match ".
+                  "predecessor in successor key\n";
+            print "debug: current in current key: ".
+                  encode_base64($current_tak_obj->current()->{'public_key'}->{'content'})."\n";
+            print "debug: predecessor in successor key: ".
+                  encode_base64($successor_tak_obj->predecessor()->{'public_key'}->{'content'})."\n";
+            $success = 0;
+        }
+        if (not $success) {
+            if ($state->{$state_key}->{'timer'}) {
+                print "debug: deleting existing timer for $tal_path ".
+                      "(successor key links are invalid)\n";
+                delete $state->{$state_key}->{'timer'};
+            }
+        } else {
+            if (not $state->{$state_key}->{'timer'}) {
+                print "debug: new successor key, adding acceptance timer for $tal_path\n";
+                $state->{$state_key}->{'timer'} = {
+                    first_seen => time(),
+                    key_data => encode_base64(
+                        $successor_tak_obj->current()->{'public_key'}->{'content'}
                     )
-                );
-            my @tal_lines =
-                (join "\n", @{$key->{'urls'}})."\n\n".
-                $key_data_out;
-            print @tal_lines;
-            print "\n\n";
+                };
+            } else {
+                # Confirm that the successor still matches.  If it
+                # doesn't, set a new timer.  If it does, and the timer
+                # has reached 30 days, switch to the new TAL.
+                my $timer = $state->{$state_key}->{'timer'};
+                if ($timer->{'key_data'} eq
+                        encode_base64($successor_tak_obj->current()->{'public_key'}->{'content'})) {
+                    print "debug: successor still matches\n";
+                    if ($timer->{'first_seen'} + THIRTY_DAYS < time()) {
+                        print "debug: successor acceptance timer has expired\n";
+                        $use_successor = 1;
+                        delete $state->{$state_key}->{'timer'};
+                    } else {
+                        print "debug: successor acceptance timer has not expired\n";
+                    }
+                } else {
+                    print "debug: successor does not match existing ".
+                          "timer key, resetting timer\n";
+                    $state->{$state_key}->{'timer'} = {
+                        first_seen => time(),
+                        key_data => encode_base64(
+                            $successor_tak_obj->current()->{'public_key'}->{'content'}
+                        )
+                    };
+                }
+            }
         }
     }
 
-    my @unrevoked_tak_objs =
-        grep { not $_->revoked() }
-            @tak_objs;
-    if (@unrevoked_tak_objs > 1) {
-        print "debug: test keys available\n";
-        for (my $i = 1; $i < @unrevoked_tak_objs; $i++) {
-            my $tak_obj = $unrevoked_tak_objs[$i];
-            print "debug: TAL for test key $i\n";
-            my $key = $tak_obj->{'current'};
-            my $key_data_out =
-                canonicalise_pem(
-                    encode_base64(
-                        $key->{'public_key'}->{'content'}
-                    )
-                );
-            my @tal_lines =
-                (join "\n", @{$key->{'urls'}})."\n\n".
-                $key_data_out;
-            print @tal_lines;
-            print "\n\n";
+    if ($use_successor) {
+        print "debug: transitioning to successor key\n";
+        my $key = $successor_tak_obj->current();
+        my $key_data_out =
+            canonicalise_pem(
+                encode_base64(
+                    $key->{'public_key'}->{'content'}
+                )
+            );
+        if (not @{$key->{'uris'}}) {
+            die "no URIs in successor key";
         }
+        my @tal_lines =
+            (join "\n", map { "# ".$_ } @{$key->{'comments'} || []})."\n".
+            (join "\n", @{$key->{'uris'} || []})."\n\n".
+            $key_data_out;
+        chdir($cwd);
+
+        write_file($tal_path, @tal_lines);
+    } else {
+        print "debug: not transitioning to successor key\n";
     }
 
-    my $first_unrevoked_tak_obj = $unrevoked_tak_objs[0];
-    if (not $first_unrevoked_tak_obj) {
-        print STDERR "All TAK objects revoked: cannot update TAL state\n";
-        exit(1);
-    }
-
-    my $key = $first_unrevoked_tak_obj->{'current'};
-    my $key_data_out =
-        canonicalise_pem(
-            encode_base64(
-                $key->{'public_key'}->{'content'}
-            )
-        );
-    my @tal_lines =
-        (join "\n", @{$key->{'urls'}})."\n\n".
-        $key_data_out;
     chdir($cwd);
-
-    write_file($tal_path, @tal_lines);
+    write_file($state_path, encode_json($state));
 
     return 1;
 }

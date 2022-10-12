@@ -8,7 +8,7 @@ use DateTime;
 
 use constant ID_SMIME  => '1.2.840.113549.1.9.16';
 use constant ID_CT     => ID_SMIME . '.1';
-use constant ID_CT_TAL => ID_CT . '.37';
+use constant ID_CT_TAL => ID_CT . '.50';
 
 use constant TAK_ASN1 => q<
     AlgorithmIdentifier ::= SEQUENCE {
@@ -21,14 +21,15 @@ use constant TAK_ASN1 => q<
     }
     CertificateURI ::= IA5String
     TAKey ::= SEQUENCE {
+        comments              SEQUENCE OF UTF8String,
         certificateURIs       SEQUENCE OF CertificateURI,
         subjectPublicKeyInfo  SubjectPublicKeyInfo
     }
     TAK ::= SEQUENCE {
-        version   [0] INTEGER,
-        current   TAKey,
-        successor TAKey OPTIONAL,
-        revoked   BOOLEAN
+        version     INTEGER OPTIONAL,
+        current     TAKey,
+        predecessor [0] TAKey OPTIONAL,
+        successor   [1] TAKey OPTIONAL
     }
 >;
 
@@ -36,8 +37,8 @@ use base qw(Class::Accessor);
 APNIC::RPKI::TAK->mk_accessors(qw(
     version
     current
+    predecessor
     successor
-    revoked
 ));
 
 sub new
@@ -46,9 +47,10 @@ sub new
 
     my $parser = Convert::ASN1->new();
     $parser->configure(
-        encoding => "DER",
-        encode   => { time => "utctime" },
-        decode   => { time => "utctime" }
+        tagdefault => 'EXPLICIT',
+        encoding   => "DER",
+        encode     => { time => "utctime" },
+        decode     => { time => "utctime" }
     );
     my $res = $parser->prepare(TAK_ASN1());
     if (not $res) {
@@ -65,17 +67,19 @@ sub _decode_key
 {
     my ($key) = @_;
 
+    my $comments = $key->{'comments'};
     my $uris = $key->{'certificateURIs'};
-    my $spki = $key->{'subjectPublicKeyInfo'};
-    my %key_data = (
-        'algorithm' => $spki->{'algorithm'}->{'algorithm'},
-        'content'   => $spki->{'subjectPublicKey'}->[0]
+    my $key_data = $key->{'subjectPublicKeyInfo'};
+    my %key_data_decoded = (
+       'algorithm' => $key_data->{'algorithm'}->{'algorithm'},
+       'content'   => $key_data->{'subjectPublicKey'}->[0],
     );
-    my %decoded_key = (
-        urls => $uris,
-        public_key => \%key_data,
+    my %key_decoded = (
+        'comments'   => $comments,
+        'uris'       => $uris,
+        'public_key' => \%key_data_decoded
     );
-    return \%decoded_key;
+    return \%key_decoded;
 }
 
 sub decode
@@ -91,12 +95,14 @@ sub decode
     $self->version($data->{'version'});
     my $current = _decode_key($data->{'current'});
     $self->current($current);
+    if ($data->{'predecessor'}) {
+        my $predecessor = _decode_key($data->{'predecessor'});
+        $self->predecessor($predecessor);
+    }
     if ($data->{'successor'}) {
         my $successor = _decode_key($data->{'successor'});
         $self->successor($successor);
     }
-    my $revoked = $data->{'revoked'};
-    $self->revoked($revoked);
 
     return 1;
 }

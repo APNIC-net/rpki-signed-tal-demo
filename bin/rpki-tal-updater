@@ -11,29 +11,35 @@ sub usage
 {
     print <<EOF;
 Usage:
-$0 --tal {tal-path}
+$0 --tal {tal-path} --state-path {state-path}
 
 This takes the TAL at `{tal-path}`, finds the TAK issued under that
-TA, and then continues resolving TAs/TAKs until it reaches an
-unrevoked key.  It then writes the earliest unrevoked current key in
-TAL format to `{tal-path}`.
+TA, and sees if the TAL should be updated to point to the successor
+key (if present).  `{state-path}` is a path to a file for recording
+the TAL updater state (acceptance timers).
 EOF
 
     exit(10);
 }
 
 my %options;
-GetOptions(\%options, 'tal=s');
+GetOptions(\%options, 'tal=s', 'state-path=s');
 if (not $options{'tal'}) {
     print "Please provide a TAL path.\n";
     usage();
 }
+if (not $options{'state-path'}) {
+    print "Please provide a state path.\n";
+    usage();
+}
 
 my $tal_path = $options{'tal'};
+my $state_path = $options{'state-path'};
 
 my $tal_updater =
     APNIC::RPKI::TALUpdater->new(
-        tal_path => $tal_path,
+        state_path => $state_path,
+        tal_path   => $tal_path,
     );
 $tal_updater->run();
 

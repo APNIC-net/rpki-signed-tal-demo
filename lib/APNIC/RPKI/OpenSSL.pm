@@ -66,7 +66,8 @@ sub verify_cms
               "-out $fn_output",
               $self->{'debug'});
 
-    return read_file($fn_output);
+    my $data = read_file($fn_output);
+    return $data;
 }
 
 sub get_ee_cert
