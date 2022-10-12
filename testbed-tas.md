@@ -43,7 +43,7 @@ MQIDAQAB
 ```
 
 To test the transition, update the acceptance timer value
-(`$state_file.$tal_path.timer.first_seen`) to zero, or some other
+(`$state_file.$tal_key_sha256_hash_hex.timer.first_seen`) to zero, or some other
 epoch value that is more than 30 days in the past.
 
 ### Two TAs with TAKs, predecessor/successor key mismatch
