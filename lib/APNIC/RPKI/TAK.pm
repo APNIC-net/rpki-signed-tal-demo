@@ -92,7 +92,7 @@ sub decode
         die $parser->error();
     }
 
-    $self->version($data->{'version'});
+    $self->version($data->{'version'} || 0);
     my $current = _decode_key($data->{'current'});
     $self->current($current);
     if ($data->{'predecessor'}) {
