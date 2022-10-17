@@ -245,8 +245,16 @@ sub _process_tal
     shift @{$ta_key_from_cert};
     pop @{$ta_key_from_cert};
     my $content = join '', @{$ta_key_from_cert};
+    my $parser = Convert::ASN1->new();
+    $parser->configure(
+        tagdefault => 'EXPLICIT',
+        encoding   => "DER",
+        encode     => { time => "utctime" },
+        decode     => { time => "utctime" }
+    );
+    $parser = $parser->prepare(APNIC::RPKI::TAK::TAK_ASN1())->find('SubjectPublicKeyInfo');
     my $ta_key_from_tak =
-        encode_base64($current->{'public_key'}->{'content'});
+        encode_base64($parser->encode($current->{'public_key'}));
     $ta_key_from_tak =~ s/\n//g;
     if ($content ne $ta_key_from_tak) {
         die "TAK key does not match TA key: ".
@@ -271,7 +279,7 @@ sub _process_tal
         my $key_data_out =
             canonicalise_pem(
                 encode_base64(
-                    $successor->{'public_key'}->{'content'}
+                    $parser->encode($successor->{'public_key'})
                 )
             );
         my @tal_lines = (
@@ -310,6 +318,15 @@ sub run
     my $state_key =
         sha256_hex($tal_data->{'public_key'}->{'content'});
 
+    my $parser = Convert::ASN1->new();
+    $parser->configure(
+        tagdefault => 'EXPLICIT',
+        encoding   => "DER",
+        encode     => { time => "utctime" },
+        decode     => { time => "utctime" }
+    );
+    $parser = $parser->prepare(APNIC::RPKI::TAK::TAK_ASN1())->find('SubjectPublicKeyInfo');
+
     if (not $successor_tak_obj) {
         print "debug: no successor for this TAL\n";
         # If there is a timer for this TAL, clear it.
@@ -321,24 +338,31 @@ sub run
         my $success = 1;
         # There is a successor TAK object.  Confirm that the original
         # key and the successor key match.
-        if ($current_tak_obj->successor()->{'public_key'}->{'content'} ne
-                $successor_tak_obj->current()->{'public_key'}->{'content'}) {
+        my $current_successor =
+            $parser->encode($current_tak_obj->successor()->{'public_key'});
+        my $successor_current =
+            $parser->encode($successor_tak_obj->current()->{'public_key'});
+        my $current_current =
+            $parser->encode($current_tak_obj->current()->{'public_key'});
+        my $successor_predecessor =
+            $parser->encode($successor_tak_obj->predecessor()->{'public_key'});
+
+        if ($current_successor ne $successor_current) {
             print "debug: successor in current key does not match ".
                   "current in successor key\n";
             print "debug: successor in current key: ".
-                  encode_base64($current_tak_obj->successor()->{'public_key'}->{'content'})."\n";
+                  encode_base64($current_successor)."\n";
             print "debug: current in successor key: ".
-                  encode_base64($successor_tak_obj->current()->{'public_key'}->{'content'})."\n";
+                  encode_base64($successor_current)."\n";
             $success = 0;
         }
-        if ($current_tak_obj->current()->{'public_key'}->{'content'} ne
-                $successor_tak_obj->predecessor()->{'public_key'}->{'content'}) {
+        if ($current_current ne $successor_predecessor) {
             print "debug: current in current key does not match ".
                   "predecessor in successor key\n";
             print "debug: current in current key: ".
-                  encode_base64($current_tak_obj->current()->{'public_key'}->{'content'})."\n";
+                  encode_base64($current_current)."\n";
             print "debug: predecessor in successor key: ".
-                  encode_base64($successor_tak_obj->predecessor()->{'public_key'}->{'content'})."\n";
+                  encode_base64($successor_predecessor)."\n";
             $success = 0;
         }
         if (not $success) {
@@ -352,17 +376,14 @@ sub run
                 print "debug: new successor key, adding acceptance timer for $tal_path\n";
                 $state->{$state_key}->{'timer'} = {
                     first_seen => time(),
-                    key_data => encode_base64(
-                        $successor_tak_obj->current()->{'public_key'}->{'content'}
-                    )
+                    key_data => encode_base64($successor_current)
                 };
             } else {
                 # Confirm that the successor still matches.  If it
                 # doesn't, set a new timer.  If it does, and the timer
                 # has reached 30 days, switch to the new TAL.
                 my $timer = $state->{$state_key}->{'timer'};
-                if ($timer->{'key_data'} eq
-                        encode_base64($successor_tak_obj->current()->{'public_key'}->{'content'})) {
+                if ($timer->{'key_data'} eq encode_base64($successor_current)) {
                     print "debug: successor still matches\n";
                     if ($timer->{'first_seen'} + THIRTY_DAYS < time()) {
                         print "debug: successor acceptance timer has expired\n";
@@ -376,9 +397,7 @@ sub run
                           "timer key, resetting timer\n";
                     $state->{$state_key}->{'timer'} = {
                         first_seen => time(),
-                        key_data => encode_base64(
-                            $successor_tak_obj->current()->{'public_key'}->{'content'}
-                        )
+                        key_data => encode_base64($successor_current)
                     };
                 }
             }
@@ -391,7 +410,7 @@ sub run
         my $key_data_out =
             canonicalise_pem(
                 encode_base64(
-                    $key->{'public_key'}->{'content'}
+                    $parser->encode($key->{'public_key'})
                 )
             );
         if (not @{$key->{'uris'}}) {

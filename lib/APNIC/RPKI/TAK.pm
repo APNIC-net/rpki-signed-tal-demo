@@ -70,14 +70,10 @@ sub _decode_key
     my $comments = $key->{'comments'};
     my $uris = $key->{'certificateURIs'};
     my $key_data = $key->{'subjectPublicKeyInfo'};
-    my %key_data_decoded = (
-       'algorithm' => $key_data->{'algorithm'}->{'algorithm'},
-       'content'   => $key_data->{'subjectPublicKey'}->[0],
-    );
     my %key_decoded = (
         'comments'   => $comments,
         'uris'       => $uris,
-        'public_key' => \%key_data_decoded
+        'public_key' => $key_data,
     );
     return \%key_decoded;
 }
