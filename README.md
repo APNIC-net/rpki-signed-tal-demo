@@ -2,7 +2,7 @@
 
 A proof-of-concept for updating the TAL for a standalone RPKI
 validator, based on the TAK issued by the TA operator.  See
-[https://tools.ietf.org/html/draft-ietf-sidrops-signed-tal](https://datatracker.ietf.org/doc/html/draft-ietf-sidrops-signed-tal-12).
+[https://tools.ietf.org/html/draft-ietf-sidrops-signed-tal](https://datatracker.ietf.org/doc/html/draft-ietf-sidrops-signed-tal-14).
 
 ### Build
 

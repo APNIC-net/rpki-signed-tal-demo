@@ -1,4 +1,4 @@
-FROM ubuntu:22.10
+FROM ubuntu:23.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -y
@@ -26,7 +26,7 @@ RUN apt-get install -y \
     vim \
     git \
     libdatetime-perl \
-    libtls25 \
+    libtls26 \
     libtls-dev \
     libdigest-sha-perl \
     libexpat1-dev \
@@ -40,13 +40,13 @@ RUN wget https://ftp.openssl.org/source/openssl-1.0.2p.tar.gz \
     && make install
 RUN yes | unminimize
 RUN addgroup \
-    --gid 1000 \
+    --gid 2000 \
     rpki-client && \
   adduser \
     --home /var/lib/rpki-client \
     --disabled-password \
-    --gid 1000 \
-    --uid 1000 \
+    --gid 2000 \
+    --uid 2000 \
     rpki-client
 RUN wget https://ftp.openbsd.org/pub/OpenBSD/rpki-client/rpki-client-7.8.tar.gz \
     && tar xf rpki-client-7.8.tar.gz \
