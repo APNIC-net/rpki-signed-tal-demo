@@ -13,6 +13,11 @@ use APNIC::RPKI::Utilities qw(system_ad);
 
 our $VERSION = '0.1';
 
+my @PATHS = qw(
+    /usr/local/ssl/bin/openssl
+    /usr/bin/openssl
+);
+
 sub new
 {
     my $class = shift;
@@ -21,7 +26,8 @@ sub new
     my $self = \%args;
 
     if (not $self->{'path'}) {
-        $self->{'path'} = "/usr/local/ssl/bin/openssl";
+        $self->{'path'} =
+            ((first { -x $_ } @PATHS) || $PATHS[0]);
     }
 
     bless $self, $class;

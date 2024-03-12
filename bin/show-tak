@@ -1,0 +1,91 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use APNIC::RPKI::OpenSSL;
+use APNIC::RPKI::TAK;
+
+use MIME::Base64 qw(encode_base64);
+use File::Slurp qw(read_file);
+use File::Temp;
+use Getopt::Long;
+
+sub usage
+{
+    print <<EOF;
+Usage:
+$0 --in {path}
+
+Show a TAK object's details.
+EOF
+
+    exit(10);
+}
+
+my %options;
+GetOptions(\%options, 'in=s');
+if (not $options{'in'}) {
+    print "Please enter an input path.\n";
+    usage();
+}
+
+my ($in) = @options{qw(in)};
+
+my $openssl = APNIC::RPKI::OpenSSL->new()->{'path'};
+my $ft = File::Temp->new();
+my $fn = $ft->filename();
+my $res = system("$openssl cms -verify -noverify -inform DER -in $in -out $fn ".
+                 ">/dev/null 2>&1");
+if ($res != 0) {
+    die "Unable to parse CMS.";
+}
+
+my $tak_data = read_file($fn);
+my $tak_obj = APNIC::RPKI::TAK->new();
+eval { $tak_obj->decode($tak_data); };
+if (my $error = $@) {
+    die "Unable to decode TAK object: $error";
+}
+
+sub print_key
+{
+    my ($obj, $name, $accessor) = @_;
+
+    print "$name:\n";
+    my $data = $obj->$accessor();
+    if (not $data) {
+        print "  N/A\n";
+        return;
+    }
+
+    print "  URIs:\n";
+    for my $uri (@{$data->{'uris'}}) {
+        print "    $uri\n";
+    }
+    my $comments = $data->{'comments'} || [];
+    if (@{$comments}) {
+        print "  Comments:\n";
+        for my $comment (@{$data->{'comments'}}) {
+            print "    $comment\n";
+        }
+    }
+    my $pk = $data->{'public_key'};
+    my $spk_data = $pk->{'subjectPublicKey'}->[0];
+    my $enc_spk_data = encode_base64($spk_data);
+    $enc_spk_data = "      $enc_spk_data";
+    $enc_spk_data =~ s/\n/\n      /g;
+    print "  Public key:\n";
+    print "    Algorithm: ".$pk->{'algorithm'}->{'algorithm'}."\n";
+    print "    Key data:\n";
+    print "$enc_spk_data\n";
+
+    return 1;
+}
+
+print "Version: ".$tak_obj->version(),"\n";
+print_key($tak_obj, "Current", "current");
+print_key($tak_obj, "Predecessor", "predecessor");
+print_key($tak_obj, "Successor", "successor");
+
+1;

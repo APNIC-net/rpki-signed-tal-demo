@@ -17,7 +17,9 @@ my $output = WriteMakefile(
     EXE_FILES      => [ qw(bin/rpki-tal-updater) ],
     PREREQ_PM      => { 'Test::More'             => 0,
                         'LWP::UserAgent'         => 0,
-                        'List::MoreUtils'        => 0 }
+                        'List::MoreUtils'        => 0,
+                        'Net::CIDR::Set'         => 0,
+                        'Set::IntSpan'           => 0, }
 );
 
 1;
